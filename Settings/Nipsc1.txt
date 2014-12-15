@@ -1,0 +1,29 @@
+symnips
+LinkSVMSym
+display 1
+stochastic nu 0
+stochastic phi 0 
+original feature 1
+var max iter 20
+var convergence 1e-4
+em max iter 25 
+em convergence 1e-4
+KL-C 4.0 
+svm-C 1.0
+init alpha 10
+svm_alg_type 2
+biased_hyperplane 0
+truncated-T 80
+phi-dual-opt 1
+forgetting rate nu 0
+forgetting rate phi 0.9 
+train_file: /Data/Nips_Coauthorship
+test_file: /Data/Nips_Coauthorship
+class-num: 2
+term-num: 0
+doc-num: 234
+relation-num: 1
+feature-num: 0
+train-size: 0
+overall_res: /Results/overall_res_nips_nonSymData_symModel.txt
+relation_root: /Data/Nips_Coauthorship/nips_coauthors

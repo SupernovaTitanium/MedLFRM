@@ -1,0 +1,22 @@
+dislay 1
+original feature 1
+var max iter 20
+var convergence 0.000100
+em max iter 7
+em convergence 0.000100
+KL-C 1.000000
+svm-C 16.000000
+init alpha 0.100000
+svm_alg_type 2
+biased_hyperplane 0
+truncated-T 50
+phi-dual-opt 1
+train_file: /Data/Kinship
+test_file: /Data/Kinship
+class-num: 2
+term-num: 0
+doc-num: 104
+relation-num: 26
+train-size: 0
+overall_res: /Results/overall_res_Kinship.txt
+relation_root: /Data/Kinship/Kinship

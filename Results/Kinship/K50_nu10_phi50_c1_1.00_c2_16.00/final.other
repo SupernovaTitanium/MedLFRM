@@ -1,0 +1,6 @@
+num_dim 50
+num_labels 2
+num_docs 104
+alpha 0.100000
+KL-C 16.0000000000
+svm-C 1.0000000000
