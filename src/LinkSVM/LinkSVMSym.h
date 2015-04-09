@@ -1,4 +1,5 @@
 #pragma once
+
 #ifndef LINKSVMSYM
 #define LINKSVMSYM
 
@@ -18,15 +19,14 @@
 #include "../SVM_Multiclass/svm_struct_learn.h"
 #include "../SVM_Multiclass/svm_struct_common.h"
 
-// This is the link prediction latent svm with symmetric link structures.
 
 class LinkSVMSym {
 public:
-    LinkSVMSym(void);
+    LinkSVMSym();
 
     LinkSVMSym(Params *pParam);
 
-    ~LinkSVMSym(void);
+    ~LinkSVMSym();
 
     double train(char *dir, Corpus *c);
 
@@ -49,7 +49,7 @@ public:
 
     void outputLowDimData(char *filename, Corpus *pC, double **phi);
 
-    void get_fvec_sym(Document *pDoc1, Document *pDoc2, double *phi1, double *phi2, double *fvec);
+    void get_fvec(Document *pDoc1, Document *pDoc2, double *phi1, double *phi2, double *fvec);
 
     void compute_nu_stat(double **var_nu);
 
@@ -85,9 +85,9 @@ public:
 
     void update_ydist_tr(Corpus *pC, double **phi);
 
-    double get_2norm_w_sym();
+    double get_2norm_w();
 
-    void get_index_sym(const int &ix, int &rowIx, int &colIx);
+    void get_index(const int &ix, int &rowIx, int &colIx);
 
     void save_model(char *model_root, Corpus *pC, double **phi);
 
@@ -111,6 +111,22 @@ public:
     }
 
     void predict(Document *doc, const int &i, double *yDist);
+
+    /****
+    * Jiaming: here are function definitions for Pegasos SVM
+    **/
+    // the entrance for learn_svm; here we overload the original function
+    void learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
+            double Cp, double Cn);
+
+    void learn_svm_pegasos(Corpus *pC, double **phi, int svm_iter);
+
+    void learn_svm_mini_batch(Corpus *pC, double **phi, double *dMu,
+        double eps, double Cp, double Cn, int em_iter);
+
+    void extract_train_links(Corpus *pC, int *from, int *to, int *label, int l);
+
+    //
 
 public:
     // hyper-parameters
@@ -164,12 +180,22 @@ public:
 
     int m_stochastic_nu;
     int m_stochastic_phi;
-    int phi_iter;
     double _delay_nu;
     double _forgetting_rate_nu;
     double _delay_phi;
     double _forgetting_rate_phi;
+//	char m_sample;
 
+    double running_time_for_update_phi;
+    double running_time_for_update_nu;
+    double running_time_for_svm;
+    double running_time_for_vi;
+    int phi_iter;
+
+    int *mini_batch_svm_to;
+    int *mini_batch_svm_from;
+    int *mini_batch_svm_label;
+    int mini_batch_svm_size;
 };
 
 #endif

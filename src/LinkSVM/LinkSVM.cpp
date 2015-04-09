@@ -1,8 +1,8 @@
 #include "LinkSVM.h"
 #include <cassert>
 #include <algorithm>
-
-#include <boost/timer.hpp>
+#include <set>
+#include <boost/timer/timer.hpp>
 #include <boost/filesystem.hpp>
 #include "../utils/simple_sparse_vec_hash.h"
 
@@ -10,6 +10,9 @@ using namespace std;
 namespace fs = boost::filesystem;
 
 #define INF HUGE_VAL
+
+std::set<std::pair<int, int> > svm_links;
+
 
 LinkSVM::LinkSVM(void) {
     _delay_nu = 1;
@@ -73,6 +76,12 @@ LinkSVM::LinkSVM(Params *param) {
     running_time_for_update_phi = 0.0;
     running_time_for_vi = 0.0;
     phi_iter = param->PHI_ITER;
+    mini_batch_svm_to = new int[m_stochastic_nu * m_stochastic_phi *
+        m_pParam->VAR_MAX_ITER * 10];
+    mini_batch_svm_from = new int[m_stochastic_nu * m_stochastic_phi *
+        m_pParam->VAR_MAX_ITER * 10];
+    mini_batch_svm_label = new int[m_stochastic_nu * m_stochastic_phi *
+        m_pParam->VAR_MAX_ITER * 10];
 }
 
 LinkSVM::~LinkSVM(void) {
@@ -171,8 +180,7 @@ void LinkSVM::free_model() {
 
 double LinkSVM::train(char *directory, Corpus *pC) {
     int d;
-    boost::timer Timer;
-
+    clock_t start_time = clock();
     // initialize model
     new_model(pC->num_docs, pC->num_train_links);
     strcpy(m_dir, directory);
@@ -206,8 +214,8 @@ double LinkSVM::train(char *directory, Corpus *pC) {
     double dTstAcc_fst = 0, dF1_fst = 0, dAUC_fst = 0, dTstAcc = 0, dTstAUC = 0;
     double dBestTstAcc, dBestTstAUC = 0, dBestTstF1, dBestTrAUC = 0;
     int nIt = 0;
-    while (((converged > m_pParam->EM_CONVERGED)
-            || (nIt <= 2)) && (nIt < m_pParam->EM_MAX_ITER)) {
+    while (/*((converged > m_pParam->EM_CONVERGED)
+            || (nIt <= 2)) && */(nIt < m_pParam->EM_MAX_ITER)) {
         if (m_pParam->DISPLAY) printf("**** em iteration %d ****\n", nIt + 1);
 
         // e-step
@@ -221,6 +229,8 @@ double LinkSVM::train(char *directory, Corpus *pC) {
         if (m_pParam->DISPLAY) printf("\t learn svm and/or hyper-parameters \n");
         //learn_svm(pC, phi, NULL); //old, traditional svm.
         learn_svm(pC, phi, NULL, 0.1, m_dC, m_dC);
+        //learn_svm_mini_batch(pC, phi, NULL, 0.1, m_dC, m_dC, nIt);
+        //learn_svm_pegasos(pC, phi, nIt);
         // check for convergence
         double dobj = lhood;
         converged = fabs((obj_old - dobj) / (obj_old));
@@ -238,13 +248,14 @@ double LinkSVM::train(char *directory, Corpus *pC) {
             }
         }
 
-        boost::timer testTimer;
+        clock_t test_start_time = clock();
         update_ydist(pC, phi);
         printf("compute_auc_tr complete\n");
         dTstAcc = get_test_acc(pC, phi);
         printf("compute_test_acc complete\n");
         dTstAUC = compute_auc(pC, m_dYDist);
-        dTstTime += testTimer.elapsed();
+        clock_t test_end_time = clock();
+        dTstTime += (test_end_time - test_start_time) / CLOCKS_PER_SEC;
         printf("compute_auc complete\n");
         update_ydist_tr(pC, phi);
         double dTrAUC = compute_auc_tr(pC, m_dYDist);
@@ -271,7 +282,8 @@ double LinkSVM::train(char *directory, Corpus *pC) {
         }
         nIt++;
     }
-    double dTrainTime = Timer.elapsed() - dTstTime;
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time) / CLOCKS_PER_SEC - dTstTime;
     fclose(likelihood_file);
     printf("Training time in (cpu-seconds): %.2f\n", dTrainTime);
 
@@ -290,8 +302,8 @@ double LinkSVM::train(char *directory, Corpus *pC) {
     sprintf(filename, "%s/evl-performance.dat", directory);
     dTstAcc = save_prediction(filename, pC, phi);
 
-    fs::path cur_path = fs::current_path().parent_path();
-    sprintf(filename, "%s%s", cur_path.string().c_str(), m_pParam->res_filename);
+    //fs::path cur_path = fs::current_path().parent_path();
+    sprintf(filename, "%s", m_pParam->res_filename);
 
     FILE *fileptr = fopen(filename, "a");
     fprintf(fileptr, "(K: %d; S_nu: %d; S_phi: %d, kappa: %.2f; F: %d; alpha: %.3f; C1: %.3f; C2: "
@@ -319,7 +331,7 @@ double LinkSVM::train(char *directory, Corpus *pC) {
 * perform inference on documents and update sufficient statistics
 */
 double LinkSVM::e_step(Corpus *pC, double **var_nu, double **phi) {
-    boost::timer Timer;
+    clock_t start_time = clock();
     Document *pDoc = NULL;
     // compute the expectation statistics
     compute_nu_stat(var_nu);
@@ -360,7 +372,8 @@ double LinkSVM::e_step(Corpus *pC, double **var_nu, double **phi) {
 
         printf("\t%.3f;  %.5f\n", obj, converged);
     }
-    double dTrainTime = Timer.elapsed();
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time) / CLOCKS_PER_SEC;
     running_time_for_vi += dTrainTime;
     return lhood;
 }
@@ -376,8 +389,10 @@ void LinkSVM::random_batch(int *target, int batch_size, int start, int end) {
 }
 
 double LinkSVM::e_step(Corpus *pC, double **var_nu, double **phi, int batch_size) {
+    mini_batch_svm_size = 0;
+    svm_links.clear();
     Document *pDoc = NULL;
-    boost::timer Timer;
+    int start_time = clock();
     // compute the expectation statistics
     printf("compute_nu_stat\n");
     compute_nu_stat(var_nu);
@@ -428,8 +443,8 @@ double LinkSVM::e_step(Corpus *pC, double **var_nu, double **phi, int batch_size
     */
     delete[]sto;
 
-
-    double dTrainTime = Timer.elapsed();
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time) / CLOCKS_PER_SEC;
     running_time_for_vi += dTrainTime;
     lhood = compute_lhood(pC, phi, var_nu);
     return lhood;
@@ -635,7 +650,7 @@ void LinkSVM::random_w() {
 void LinkSVM::update_phi(Corpus *pC, Document *pDoc, double **phi, const int &docId,
         double **var_nu) {
     //printf("id = %d\n", docId);
-    boost::timer Timer;
+    clock_t start_time = clock();
     //FILE *fptr = fopen("phi_intermediate.txt", "a");
     double *phiPtr = phi[docId];
     for (int k = 0; k < m_nK; k++) {
@@ -664,14 +679,15 @@ void LinkSVM::update_phi(Corpus *pC, Document *pDoc, double **phi, const int &do
         //system("pause");
         phiPtr[k] = safe_logist(dVal);
     }
-    double dTrainTime = Timer.elapsed();
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time) / CLOCKS_PER_SEC;
     running_time_for_update_phi += dTrainTime;
 }
 
 void LinkSVM::update_phi(Corpus *pC, Document *pDoc, double **phi, const int &docId,
         double **var_nu, const int batch_size, int iter) {
     //printf("id = %d\n", docId);
-    boost::timer Timer;
+    clock_t start_time = clock();
     //printf("sto update phi b-size %d\n", batch_size);
     //FILE *fptr = fopen("phi_intermediate.txt", "a");
     double *phiPtr = phi[docId];
@@ -697,7 +713,8 @@ void LinkSVM::update_phi(Corpus *pC, Document *pDoc, double **phi, const int &do
         int infer_links = 0;
         //for (int i = 0, j = randomMT() % pDoc->num_neighbors;
         //  i < real_batch_size; i++, j = (j + randomMT()) % pDoc->num_neighbors) {
-        for (int i = 0, j = (randomMT()) % (pDoc->num_neighbors); i < real_batch_size; j = (j + 1) % (pDoc->num_neighbors)) {
+        for (int i = 0, j = (randomMT()) % (pDoc->num_neighbors);
+             i < real_batch_size; j = (j + 1) % (pDoc->num_neighbors)) {
 
             if (!pDoc->bTrain[j]) {
                 continue;
@@ -709,20 +726,48 @@ void LinkSVM::update_phi(Corpus *pC, Document *pDoc, double **phi, const int &do
             if (jIx != docId) { // different entities
                 loss_aug_predict(pDoc, pDoc2, phiPtr, phi[jIx], j);
                 dVal += compute_mrgterm_right(pDoc, phi[jIx], j, k);
+                if (svm_links.find(make_pair(docId, jIx)) == svm_links.end()) {
+                    mini_batch_svm_from[mini_batch_svm_size] = docId;
+                    mini_batch_svm_to[mini_batch_svm_size] = jIx;
+                    mini_batch_svm_label[mini_batch_svm_size] =
+                        pDoc->linkGnd[j];
+                    svm_links.insert(make_pair(docId, jIx));
+                    mini_batch_svm_size++;
+                }
+
                 infer_links++;
                 int dIx = pDoc2->find_nix(docId);
                 if (dIx > -1 && pDoc2->bTrain[dIx]) {
                     loss_aug_predict(pDoc2, pDoc, phi[jIx], phiPtr, dIx);
                     dVal += compute_mrgterm_left(pDoc2, phi[jIx], dIx, k);
+                    if (svm_links.find(make_pair(jIx, docId)) ==
+                        svm_links.end()) {
+                        mini_batch_svm_from[mini_batch_svm_size] = jIx;
+                        mini_batch_svm_to[mini_batch_svm_size] = docId;
+                        mini_batch_svm_label[mini_batch_svm_size] =
+                            pDoc2->linkGnd[dIx];
+                        svm_links.insert(make_pair(jIx, docId));
+                        mini_batch_svm_size++;
+                    }
                     infer_links++;
                 }
             } else { // same entity
                 loss_aug_predict(pDoc, pDoc2, phiPtr, phi[jIx], j);
                 dVal += compute_mrgterm_self(pDoc, phi[jIx], j, k);
+                if (svm_links.find(make_pair(docId, docId)) ==
+                    svm_links.end()) {
+                    mini_batch_svm_from[mini_batch_svm_size] = docId;
+                    mini_batch_svm_to[mini_batch_svm_size] = docId;
+                    mini_batch_svm_label[mini_batch_svm_size] =
+                        pDoc->linkGnd[j];
+                    svm_links.insert(make_pair(docId, docId));
+                    mini_batch_svm_size++;
+                }
+
                 infer_links++;
             }
         }
-        //printf("\ninfer = %d\n", infer_links);
+        //printf("\nmini = %d\n", mini_batch_svm_size);
 
         dVal *= (double) real_infer_links / (double) infer_links;
         //printf("%lf\n", dVal);
@@ -734,7 +779,8 @@ void LinkSVM::update_phi(Corpus *pC, Document *pDoc, double **phi, const int &do
         double rou = step_size(iter, _delay_phi, _forgetting_rate_phi);
         phiPtr[k] = (1 - rou) * phiPtr[k] + rou * newPhi;
     }
-    double dTrainTime = Timer.elapsed();
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time) / CLOCKS_PER_SEC;
     running_time_for_update_phi += dTrainTime;
 }
 
@@ -788,7 +834,7 @@ double LinkSVM::compute_mrgterm_self(Document *doc, double *phi, const int &j, c
 
 void LinkSVM::update_nu(Corpus *pC, double **var_nu, double **phi) {
     // double *phiPtr = NULL;
-    boost::timer Timer;
+    clock_t start_time = clock();
     // sum the expected number of features.
     memset(m_exp_feat_num_, 0, sizeof(double) * m_nK);
     for (int d = 0; d < pC->num_docs; d++) {
@@ -818,13 +864,14 @@ void LinkSVM::update_nu(Corpus *pC, double **var_nu, double **phi) {
         var_nu[k][0] = dVal1;
         var_nu[k][1] = dVal2;
     }
-    double dTrainTime = Timer.elapsed();
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time) / CLOCKS_PER_SEC;
     running_time_for_update_nu += dTrainTime;
 }
 
 void LinkSVM::update_nu(Corpus *pC, double **var_nu, double **phi, int *batch, int batch_size, int iter) {
     //double *phiPtr = NULL;
-    boost::timer Timer;
+    clock_t start_time = clock();
     // sum the expected number of features.
     memset(m_exp_feat_num_, 0, sizeof(double) * m_nK);
     for (int d = 0; d < pC->num_docs; d++) {
@@ -866,7 +913,8 @@ void LinkSVM::update_nu(Corpus *pC, double **var_nu, double **phi, int *batch, i
 
     }
     delete[]tmp;
-    double dTrainTime = Timer.elapsed();
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time)/CLOCKS_PER_SEC;
     running_time_for_update_nu += dTrainTime;
 }
 
@@ -1162,7 +1210,6 @@ void LinkSVM::set_init_param(STRUCT_LEARN_PARM *struct_parm, LEARN_PARM *learn_p
 }
 
 void LinkSVM::learn_svm(Corpus *pC, double **phi, double *dMu) {
-    boost::timer Timer;
     LEARN_PARM learn_parm;
     KERNEL_PARM kernel_parm;
     STRUCT_LEARN_PARM struct_parm;
@@ -1258,8 +1305,6 @@ void LinkSVM::learn_svm(Corpus *pC, double **phi, double *dMu) {
     // free the memory
     free_struct_sample(m_sample);
     free_struct_model(structmodel);
-    double dTrainTime = Timer.elapsed();
-    running_time_for_svm += dTrainTime;
 }
 
 void LinkSVM::get_index(const int &ix, int &rowIx, int &colIx) {
@@ -1629,43 +1674,17 @@ double LinkSVM::save_prediction(char *filename, Corpus *pC, double **phi) {
 * Jiaming: Accelerated SVM functions
 */
 
-// A coordinate descent algorithm for
-// L1-loss and L2-loss SVM dual problems
-//
-//  min_\alpha  0.5(\alpha^T (Q + D)\alpha) - e^T \alpha,
-//    s.t.      0 <= \alpha_i <= upper_bound_i,
-//
-//  where Qij = yi yj xi^T xj and
-//  D is a diagonal matrix
-//
-// In L1-SVM case:
-// 		upper_bound_i = Cp if y_i = 1
-// 		upper_bound_i = Cn if y_i = -1
-// 		D_ii = 0
-// In L2-SVM case:
-// 		upper_bound_i = INF
-// 		D_ii = 1/(2*Cp)	if y_i = 1
-// 		D_ii = 1/(2*Cn)	if y_i = -1
-//
-// Given:
-// x, y, Cp, Cn
-// eps is the stopping tolerance
-//
-// solution will be put in w
-//
-// See Algorithm 3 of Hsieh et al., ICML 2008
-
 void LinkSVM::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
         double Cp, double Cn) {// CPositive, CNegative
-    boost::timer Timer;
-
+    clock_t start_time = clock();
+    printf("learn_svm");
     int l = pC->num_train_links;
     int w_size = this->m_nSVMFeature;
     int s;
     double C, d, G;
     double *t_alpha = new double[m_nLabelNum * l];
     double *t_w = new double[m_nLabelNum * w_size];
-
+    double *fvec = new double[l * w_size];
     for (int t_label = 0; t_label < m_nLabelNum; t_label++) {
         if (m_nLabelNum == 2 && t_label == 1) {
             for (int i = 0; i < w_size; i++) {
@@ -1694,9 +1713,7 @@ void LinkSVM::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
         int *y = new int[l];
         int *from = new int[l], *to = new int[l];
         int id = 0;
-        // TODO #1: initialize y according to the label
         extract_train_links(pC, from, to, y, t_label);
-        // #1
         for (int i = 0; i < l; i++) {
             alpha[i] = 0;
         }
@@ -1704,17 +1721,16 @@ void LinkSVM::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
             w[i] = 0;
         }
         id = 0;
-        double *fvec = new double[w_size];
         for (int i = 0; i < l; i++) {
             QD[i] = diag[y[i] + 1];
             get_fvec(&(pC->docs[from[i]]),
                     &(pC->docs[to[i]]),
                     phi[from[i]],
                     phi[to[i]],
-                    fvec);
+                    fvec + i * w_size);
             for (int j = 0; j < w_size; j++) {
-                QD[i] += fvec[j] * fvec[j];
-                w[j] += y[i] * alpha[i] * fvec[j];
+                QD[i] += fvec[i * w_size + j] * fvec[i * w_size + j];
+                w[j] += y[i] * alpha[i] * fvec[i * w_size + j];
             }
             index[i] = i;
         }
@@ -1722,21 +1738,17 @@ void LinkSVM::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
         while (iter < 1000) {
             PGmax_new = -INF;
             PGmin_new = INF;
-            for (int i = 0; i < active_size; i++) {
+            for (int i = 0; i < active_size / 2; i++) {
                 int j = i + rand() % (active_size - i);
                 swap(index[i], index[j]);
             }
             for (s = 0; s < active_size; s++) {
-                int i = index[s];
+                int i = index[rand() % active_size];
                 G = 0;
                 int yi = y[i];
-                get_fvec(&(pC->docs[from[i]]),
-                        &(pC->docs[to[i]]),
-                        phi[from[i]],
-                        phi[to[i]],
-                        fvec);
+
                 for (int j = 0; j < w_size; j++) {
-                    G += w[j] * fvec[j];
+                    G += w[j] * fvec[i * w_size + j];
                 }
                 G = G * yi - 1;
                 C = upper_bound[y[i] + 1];
@@ -1773,13 +1785,9 @@ void LinkSVM::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
                     double alpha_old = alpha[i];
                     alpha[i] = std::min(std::max(alpha[i] - G / QD[i], 0.0), C);
                     d = (alpha[i] - alpha_old) * yi;
-                    get_fvec(&(pC->docs[from[i]]),
-                            &(pC->docs[to[i]]),
-                            phi[from[i]],
-                            phi[to[i]],
-                            fvec);
+
                     for (int j = 0; j < w_size; j++) {
-                        w[j] += fvec[j] * d;
+                        w[j] += fvec[i * w_size + j] * d;
                     }
                 }
             }
@@ -1840,8 +1848,344 @@ void LinkSVM::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
             wOrgPtr[i] = t_w[wIx];
         }
     }
+    delete fvec;
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time) / CLOCKS_PER_SEC;
+    printf("training time: %lf\n", dTrainTime);
+    running_time_for_svm += dTrainTime;
+}
 
-    double dTrainTime = Timer.elapsed();
+void LinkSVM::learn_svm_mini_batch(Corpus *pC, double **phi, double *dMu,
+    double eps, double Cp, double Cn, int em_iter) {// CPositive, CNegative
+    clock_t start_time = clock();
+    printf("svm-batch: %d\n", mini_batch_svm_size);
+    //int l = pC->num_train_links;
+    int l = mini_batch_svm_size;
+    int w_size = this->m_nSVMFeature;
+    int s;
+    double C, d, G;
+    double *t_alpha = new double[m_nLabelNum * l];
+    double *t_w = new double[m_nLabelNum * w_size];
+    double *fvec = new double[l * w_size];
+    for (int t_label = 0; t_label < m_nLabelNum; t_label++) {
+        if (m_nLabelNum == 2 && t_label == 1) {
+            for (int i = 0; i < w_size; i++) {
+                t_w[i + w_size] = -t_w[i];
+            }
+            for (int i = 0; i < l; i++) {
+                t_alpha[i + l] = -t_alpha[i];
+            }
+            break;
+        }
+        double *QD = new double[l];
+        int iter = 0;
+        int max_iter = 1000;
+        int *index = new int[l];
+        int active_size = l;
+        double *alpha = t_alpha + t_label * l;
+        double *w = t_w + t_label * w_size;
+        double PG;
+        double PGmax_old = INF;
+        double PGmin_old = -INF;
+        double PGmax_new, PGmin_new;
+        // solver type: L2R_L1LOSS_SVC_DUAL
+        double diag[3] = {0, 0, 0};
+
+        double upper_bound[3] = {Cn, 0, Cp};
+        int *y = new int[l];
+
+        int id = 0;
+
+        for (int i = 0; i < l; i++) {
+            alpha[i] = 0;
+        }
+        for (int i = 0; i < w_size; i++) {
+            w[i] = 0;
+        }
+        id = 0;
+        //int *from = new int[l], *to = new int[l];
+        //extract_train_links(pC, from, to, y, t_label);
+        int *from = mini_batch_svm_from, *to = mini_batch_svm_to;
+        for (int i = 0; i < l; i++) {
+            if (mini_batch_svm_label[i] == t_label) y[i] = 1;
+            else y[i] = -1;
+        }
+        for (int i = 0; i < l; i++) {
+            QD[i] = diag[y[i] + 1];
+            get_fvec(&(pC->docs[from[i]]),
+                &(pC->docs[to[i]]),
+                phi[from[i]],
+                phi[to[i]],
+                fvec + i * w_size);
+            for (int j = 0; j < w_size; j++) {
+                QD[i] += fvec[i * w_size + j] * fvec[i * w_size + j];
+                w[j] += y[i] * alpha[i] * fvec[i * w_size + j];
+            }
+            index[i] = i;
+        }
+        printf("max_iter: %d\n", max_iter);
+        while (iter < max_iter) {
+            PGmax_new = -INF;
+            PGmin_new = INF;
+            for (int i = 0; i < active_size / 2; i++) {
+                int j = i + rand() % (active_size - i);
+                swap(index[i], index[j]);
+            }
+            for (s = 0; s < active_size; s++) {
+                int i = index[rand() % active_size];
+                G = 0;
+                int yi = y[i];
+
+                for (int j = 0; j < w_size; j++) {
+                    G += w[j] * fvec[i * w_size + j];
+                }
+                G = G * yi - 1;
+                C = upper_bound[y[i] + 1];
+                G += alpha[i] * diag[y[i] + 1];
+                PG = 0;
+                if (alpha[i] == 0) {
+                    if (G > PGmax_old) {
+                        active_size--;
+                        swap(index[s], index[active_size]);
+                        s--;
+                        continue;
+                    }
+                    else if (G < 0) {
+                        PG = G;
+                    }
+                }
+                else if (alpha[i] == C) {
+                    if (G < PGmin_old) {
+                        active_size--;
+                        swap(index[s], index[active_size]);
+                        s--;
+                        continue;
+                    }
+                    else if (G > 0) {
+                        PG = G;
+                    }
+                }
+                else {
+                    PG = G;
+                }
+                PGmax_new = std::max(PGmax_new, PG);
+                PGmin_new = std::min(PGmin_new, PG);
+                if (fabs(PG) > 1.0e-12) {
+                    double alpha_old = alpha[i];
+                    alpha[i] = std::min(std::max(alpha[i] - G / QD[i], 0.0), C);
+                    d = (alpha[i] - alpha_old) * yi;
+
+                    for (int j = 0; j < w_size; j++) {
+                        w[j] += fvec[i * w_size + j] * d;
+                    }
+                }
+            }
+            iter++;
+            if (iter % 100 == 0) {
+                printf("#%d: %lf %lf\n", iter, PGmax_new, PGmin_new);
+            }
+            if (PGmax_new - PGmin_new <= eps) {
+                if (active_size == l) {
+                    break;
+                }
+                else {
+                    active_size = l;
+                    printf("*");
+                    PGmax_old = INF;
+                    PGmin_old = -INF;
+                    continue;
+                }
+            }
+            PGmax_old = PGmax_new;
+            PGmin_old = PGmin_new;
+            if (PGmax_old <= 0) {
+                PGmax_old = INF;
+            }
+            if (PGmin_old >= 0) {
+                PGmin_old = -INF;
+            }
+        }
+        printf("optimization finished, #iter = %d\n", iter);
+        if (iter >= max_iter) {
+            printf("WARNING: reaching max number of iterations.\n");
+        }
+    }
+
+    // WARNING: THE FOLLOWING MIGHT NOT BE CORRECT!
+    // BUT the input for dMU is NULL! HELL.....YEAH!!!!!
+    if (dMu != NULL) {
+        int nVar = l * m_nLabelNum;
+
+        for (int k = 0; k < l; k++) {
+            dMu[k] = t_alpha[k];
+        }
+    }
+    int rowIx, colIx;
+    // WARNING: yi cannot be larger than 1 in this setting.
+    m_dB = 0;
+    double rou = 1.0 / (em_iter + 1);
+    printf("rou = %lf\n", rou);
+    for (int yi = 0; yi < m_nLabelNum; yi++) {
+        int nRefIx = yi * m_nSVMFeature;
+        double **wPtr = m_dW[yi];
+        for (int i = 0; i < m_nLatentFeatures; i++) {
+            int wIx = nRefIx + i;
+            get_index(i, rowIx, colIx);
+            wPtr[rowIx][colIx] = (1 - rou) * wPtr[rowIx][colIx] + rou *
+                t_w[wIx];
+        }
+        double *wOrgPtr = m_dOrgW[yi];
+        for (int i = 0; i < m_nOrgFeatures; i++) {
+            int wIx = nRefIx + m_nLatentFeatures + i;
+            wOrgPtr[i] = (1 - rou) * wOrgPtr[i] + rou * t_w[wIx];
+        }
+    }
+    delete fvec;
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time) / CLOCKS_PER_SEC;
+    printf("training time: %lf\n", dTrainTime);
+    running_time_for_svm += dTrainTime;
+}
+
+void LinkSVM::learn_svm_pegasos(Corpus *pC, double **phi, int svm_iter) {
+    clock_t start_time = clock();
+
+    int l = pC->num_train_links;
+    int *from = new int[l], *to = new int[l];
+    int w_size = this->m_nSVMFeature;
+    double lambda = 1.0 / (l * m_dC);
+    int max_iter = (int)(100.0 / lambda * (0.7 + 0.3 * exp(-svm_iter)));
+    int exam_per_iter = 1;
+    int num_iter_to_avg = 100;
+    double *t_w = new double[m_nLabelNum * w_size];
+    double *fvec = new double[l];
+    int *label = new int[l];
+
+    int rowIx, colIx;
+    //printf("lambda = %lf\n", lambda);
+
+    for (int yi = 0; yi < m_nLabelNum; yi++) {
+        int nRefIx = yi * m_nSVMFeature;
+        double **wPtr = m_dW[yi];
+        for (int i = 0; i < m_nLatentFeatures; i++) {
+            int wIx = nRefIx + i;
+            get_index(i, rowIx, colIx);
+            t_w[wIx] = wPtr[rowIx][colIx];
+        }
+        double *wOrgPtr = m_dOrgW[yi];
+        for (int i = 0; i < m_nOrgFeatures; i++) {
+            int wIx = nRefIx + m_nLatentFeatures + i;
+            t_w[wIx] = wOrgPtr[i];
+        }
+    }
+    for (int t_label = 0; t_label < m_nLabelNum; t_label++) {
+        if (m_nLabelNum == 2 && t_label == 1) {
+            for (int i = 0; i < w_size; i++) {
+                t_w[i + w_size] = -t_w[i];
+            }
+            break;
+        }
+        double *avg_w = t_w + t_label * w_size;
+        double *w = new double[w_size];
+
+
+        extract_train_links(pC, from, to, label, t_label);
+
+        for (int i = 0; i < w_size; i++) {
+            w[i] = avg_w[i];
+            avg_w[i] = 0;
+        }
+
+        int avg_scale = (num_iter_to_avg > max_iter)? max_iter :
+            num_iter_to_avg;
+        for (int i = 0; i < max_iter; i++) {
+            std::vector<int> grad_index;
+            std::vector<double> grad_weights;
+            double eta = 1 / (lambda * (i + 2)); // learning rate?
+            int r = rand() % l;
+            double prediction = 0;
+            get_fvec(&(pC->docs[from[r]]),
+                &(pC->docs[to[r]]),
+                phi[from[r]],
+                phi[to[r]],
+                fvec);
+
+            for (int k = 0; k < w_size; k++) {
+                prediction += w[k] * fvec[k];
+            }
+            double curloss = 1 - label[r] * prediction;
+
+            if (curloss > 0.0) {
+                grad_index.push_back(r);
+                grad_weights.push_back((eta * label[r]));
+            }
+
+            for (int k = 0; k < w_size; k++) {
+                w[k] *= (1.0 - eta * lambda);
+            }
+            for (int j = 0; j < grad_index.size(); j++) {
+
+                for (int k = 0; k < w_size; k++) {
+                    w[k] += fvec[k] * grad_weights[j];
+                }
+            }
+            double w_norm = 0;
+            for (int k = 0; k < w_size; k++) {
+                w_norm +=  w[k] * w[k];
+            }
+            if (w_norm > 1.0 / lambda) {
+                for (int k = 0; k < w_size; k++) {
+                    w[k] *= sqrt(1.0 / (lambda * w_norm));
+                }
+            }
+            w_norm = 0;
+            for (int k = 0; k < w_size; k++) {
+                w_norm +=  w[k] * w[k];
+            }
+            if (i + avg_scale >= max_iter) {
+                for (int k = 0; k < w_size; k++) {
+                    avg_w[k] += w[k] / (double) avg_scale;
+                }
+            }
+        }
+        double loss = 0.0;
+        for (int j = 0; j < l; j++) {
+            double pred = 0.0;
+            get_fvec(&(pC->docs[from[j]]),
+                &(pC->docs[to[j]]),
+                phi[from[j]],
+                phi[to[j]],
+                fvec);
+            for (int k = 0; k < w_size; k++) {
+                pred += avg_w[k] * fvec[k];
+            }
+            if (1 - label[j] * pred > 0.0) loss += (1 - label[j] * pred);
+        }
+        printf("loss: %lf\n", loss);
+    }
+
+    // WARNING: yi cannot be larger than 1 in this setting.
+    m_dB = 0;
+    for (int yi = 0; yi < m_nLabelNum; yi++) {
+        int nRefIx = yi * m_nSVMFeature;
+        double **wPtr = m_dW[yi];
+        for (int i = 0; i < m_nLatentFeatures; i++) {
+            int wIx = nRefIx + i;
+            get_index(i, rowIx, colIx);
+            wPtr[rowIx][colIx] = t_w[wIx];
+        }
+        double *wOrgPtr = m_dOrgW[yi];
+        for (int i = 0; i < m_nOrgFeatures; i++) {
+            int wIx = nRefIx + m_nLatentFeatures + i;
+            wOrgPtr[i] = t_w[wIx];
+        }
+    }
+    delete []from;
+    delete []to;
+    delete []t_w;
+    delete []fvec;
+    clock_t end_time = clock();
+    double dTrainTime = (end_time - start_time) / CLOCKS_PER_SEC;
     printf("training time: %lf\n", dTrainTime);
     running_time_for_svm += dTrainTime;
 }
@@ -1864,3 +2208,4 @@ void LinkSVM::extract_train_links(Corpus *pC, int *from, int *to, int *label, in
         }
     }
 }
+

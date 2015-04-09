@@ -119,7 +119,13 @@ public:
     void learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
             double Cp, double Cn);
 
+    void learn_svm_pegasos(Corpus *pC, double **phi, int svm_iter);
+
+    void learn_svm_mini_batch(Corpus *pC, double **phi, double *dMu,
+        double eps, double Cp, double Cn, int em_iter);
+
     void extract_train_links(Corpus *pC, int *from, int *to, int *label, int l);
+
     //
 
 public:
@@ -185,6 +191,11 @@ public:
     double running_time_for_svm;
     double running_time_for_vi;
     int phi_iter;
+
+    int *mini_batch_svm_to;
+    int *mini_batch_svm_from;
+    int *mini_batch_svm_label;
+    int mini_batch_svm_size;
 };
 
 #endif

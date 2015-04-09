@@ -8,7 +8,7 @@
 #include "LinkSVM/LinkSVMSym.h"
 #include "utils/Corpus.h"
 #include "utils/Params.h"
-
+#include "LinkSVM/LinkSVMDiag.h"
 namespace fs = boost::filesystem;
 namespace po = boost::program_options;
 
@@ -39,19 +39,20 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (argc > 1) {
+    printf("read settings begin...\n");
     Corpus* c = NULL;
     Params param;
-    fs::path Path = fs::current_path().parent_path();
-    Path += fs::path("/Settings/");
+    //fs::path Path = fs::current_path().parent_path();
+    //Path += fs::path("/Settings/");
     char settings_file[512];
-    strcpy(settings_file, Path.string().c_str());
+    //strcpy(settings_file, Path.string().c_str());
     if (vm.count("settings")) {
-      strcat(settings_file, vm["settings"].as<std::string>().c_str());
+      strcpy(settings_file, vm["settings"].as<std::string>().c_str());
     } else {
       std::cout << desc << std::endl;
       return 0;
     }
-    //printf("read settings from %s\n", settings_file);
+    printf("read settings from %s\n", settings_file);
     param.read_settings(settings_file);
     printf("label: %s\n", param.label);
     if (vm.count("truncate")) {
@@ -90,10 +91,9 @@ int main(int argc, char **argv) {
     if (vm.count("phi_iter")) {
       param.PHI_ITER = vm["phi_iter"].as<int>();
     }
-
-    char fileName[512];
-    char cur[512];
-    char dir[512], directory[512];
+    char fileName[5120];
+    char cur[5120];
+    char dir[5120], directory[5120];
     fs::path curPath;
     curPath = fs::current_path().parent_path();
     strcpy(cur, curPath.string().c_str());
@@ -117,18 +117,19 @@ int main(int argc, char **argv) {
 
          sprintf(fileName, "%s_R%d.dat", param.file_root, i + 1);
          strcat(cur, fileName);
-         c->read(cur, param.NDOCS);
+         c->read(fileName, param.NDOCS);
          sprintf(fileName, "%s_R%d_trSample.dat", param.file_root, i + 1);
          strcpy(cur, curPath.string().c_str());
-         strcat(cur, fileName);
+         //strcat(fileName, fileName);
 
-         c->set_train_tag(80, cur);
+         c->set_train_tag(80, fileName);
 
-         sprintf(dir, "/K%d_nu%d_phi%d_c1_%.2f_c2_%.2f", param.T, param.STOCHASTIC_NU,
+         sprintf(dir, "/K%d_nu%d_phi%d_c1_%.2f_c2_%.2f", param.T, param
+                 .STOCHASTIC_NU,
                  param.STOCHASTIC_PHI, param.INITIAL_C1, param.INITIAL_C2);
-         curPath = fs::current_path().parent_path();
-         curPath += fs::path("/Results/Kinship");
-         strcpy(directory, curPath.string().c_str());
+         //curPath = fs::current_path().parent_path();
+         //curPath += fs::path("/Results/Kinship");
+         strcpy(directory, param.file_root);
          strcat(directory, dir);
          fs::create_directory(fs::path(directory));
 
@@ -150,20 +151,19 @@ int main(int argc, char **argv) {
        printf("dMeanAUC = %.5f\tdStd = %.5f\n", dMeanAUC, dStd);
     } else if (strcmp(param.label, "symnips") == 0) {
       c = new Corpus();
-
       sprintf(fileName, "%s_R1.dat", param.file_root);
       strcat(cur, fileName);
-      c->read(cur, param.NDOCS);
+      c->read(fileName, param.NDOCS);
 
       sprintf(fileName, "%s_R1_trSample_nonSym.dat", param.file_root);
       strcpy(cur, curPath.string().c_str());
       strcat(cur, fileName);
-      c->set_train_tag(80, cur);
+      c->set_train_tag(80, fileName);
       sprintf(dir, "/K%d_nu%d_phi%d_knu%.1f_kphi%.1f_c1%.1f_c2%.1f_%s", param.T, param.STOCHASTIC_NU,
                        param.STOCHASTIC_PHI, param.FORGETRATE_NU, param.FORGETRATE_PHI, param.INITIAL_C1, param.INITIAL_C2, param.model);
       curPath = fs::current_path().parent_path();
       curPath += fs::path("/Results/Nips_Coauthorship");
-      strcpy(directory, curPath.string().c_str());
+      strcpy(directory, param.file_root);
       strcat(directory, dir);
       fs::create_directory(fs::path(directory));
       if (strcmp(param.model, "LinkSVMSym") == 0) {
@@ -174,20 +174,70 @@ int main(int argc, char **argv) {
       c = new Corpus();
       sprintf(fileName, "%s.dat", param.file_root);
       strcat(cur, fileName);
-      c->read2(cur, param.NDOCS);
+      printf("%s\n", fileName);
+      c->read2(fileName, param.NDOCS);
+      //c->read2(cur, param.NDOCS);
       sprintf(fileName, "%s_trSample.dat", param.file_root);
       strcpy(cur, curPath.string().c_str());
       strcat(cur, fileName);
-      c->set_train_tag_rand(80, cur);
+      c->set_train_tag_rand(80, fileName);
       sprintf(dir, "/K%d_nu%d_phi%d_a%.1f_ell%.1f_c1%.1f_c2%.1f_%s", param.T, param.STOCHASTIC_NU,
                        param.STOCHASTIC_PHI, param.INITIAL_ALPHA, param.DELTA_ELL, param.INITIAL_C1, param.INITIAL_C2, param.model);
-      curPath = fs::current_path().parent_path();
-      curPath += fs::path("/Results/Wiki");
-      strcpy(directory, curPath.string().c_str());
+      //curPath = fs::current_path().parent_path();
+      //curPath += fs::path("/Results/Wiki");
+      strcpy(directory, param.file_root);
       strcat(directory, dir);
       fs::create_directory(fs::path(directory));
       if (strcmp(param.model, "LinkSVM") == 0) {
         LinkSVM model(&param);
+        model.train(directory, c);
+      }
+    } else if (strcmp(param.label, "AP") == 0) {
+      c = new Corpus();
+      sprintf(fileName, "%s.dat", param.file_root);
+      strcat(cur, fileName);
+      c->read2(fileName, param.NDOCS);
+      sprintf(fileName, "%s_trSample.dat", param.file_root);
+      strcpy(cur, curPath.string().c_str());
+      strcat(cur, fileName);
+      c->set_train_tag_rand(80, fileName);
+      sprintf(dir, "/K%d_nu%d_phi%d_a%.1f_ell%.1f_c1%.1f_c2%.1f_%s_diag", param.T, param.STOCHASTIC_NU,
+          param.STOCHASTIC_PHI, param.INITIAL_ALPHA, param.DELTA_ELL, param.INITIAL_C1, param.INITIAL_C2, param.model);
+      curPath = fs::current_path().parent_path();
+      curPath += fs::path("/Results/AP");
+      curPath = fs::path();
+      strcpy(directory, param.file_root);
+      strcat(directory, dir);
+      fs::create_directory(fs::path(directory));
+      if (strcmp(param.model, "LinkSVMSym") == 0) {
+        LinkSVMDiag model(&param);
+        model.train(directory, c);
+      } else if (strcmp(param.model, "LinkSVM") == 0) {
+        LinkSVMDiag model(&param);
+        model.train(directory, c);
+      }
+    } else if (strcmp(param.label, "CM") == 0) {
+      c = new Corpus();
+      sprintf(fileName, "%s.dat", param.file_root);
+      strcat(cur, fileName);
+      c->read2(fileName, param.NDOCS);
+      sprintf(fileName, "%s_trSample.dat", param.file_root);
+      strcpy(cur, curPath.string().c_str());
+      strcat(cur, fileName);
+      c->set_train_tag_rand(80, fileName);
+      sprintf(dir, "/K%d_nu%d_phi%d_a%.1f_ell%.1f_c1%.1f_c2%.1f_%s_diag", param.T, param.STOCHASTIC_NU,
+          param.STOCHASTIC_PHI, param.INITIAL_ALPHA, param.DELTA_ELL, param.INITIAL_C1, param.INITIAL_C2, param.model);
+      curPath = fs::current_path().parent_path();
+      curPath += fs::path("/Results/CM");
+      curPath = fs::path();
+      strcpy(directory, param.file_root);
+      strcat(directory, dir);
+      fs::create_directory(fs::path(directory));
+      if (strcmp(param.model, "LinkSVMSym") == 0) {
+        LinkSVMDiag model(&param);
+        model.train(directory, c);
+      } else if (strcmp(param.model, "LinkSVM") == 0) {
+        LinkSVMDiag model(&param);
         model.train(directory, c);
       }
     }

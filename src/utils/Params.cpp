@@ -39,7 +39,7 @@ Params::Params(void)
 	ORG_FEATURE = 0;
 	TRAIN_RATIO = 80;
 	SYMMETRIC = 0;
-	DELTA_ELL = 4;
+	DELTA_ELL = 16;
 	NUM_FEATURES = 0;
 	NFOLDS = 0;
 }
