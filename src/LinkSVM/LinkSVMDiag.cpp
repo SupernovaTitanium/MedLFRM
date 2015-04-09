@@ -1662,7 +1662,7 @@ void LinkSVMDiag::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
     }
     double *QD = new double[l];
     int iter = 0;
-    int max_iter = 1000;
+    int max_iter = 100;//1000; // modified 
     int *index = new int[l];
     int active_size = l;
     double *alpha = t_alpha + t_label * l;
