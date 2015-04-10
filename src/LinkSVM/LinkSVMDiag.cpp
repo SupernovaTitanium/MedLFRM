@@ -1700,7 +1700,7 @@ void LinkSVMDiag::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
       index[i] = i;
     }
     printf("max_iter: %d\n", max_iter);
-    while (iter < 1000) {
+    while (iter < max_iter) {
       PGmax_new = -INF;
       PGmin_new = INF;
       for (int i = 0; i < active_size / 2; i++) {
