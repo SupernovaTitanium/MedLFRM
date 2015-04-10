@@ -125,6 +125,7 @@ class LinkSVMDiag {
       double eps, double Cp, double Cn, int em_iter);
   
   void extract_train_links(Corpus *pC, int *from, int *to, int *label, int l);
+  int extract_train_links(Corpus *pC, int *from, int *to, int *label, int l, int max_num);
   
   //
 

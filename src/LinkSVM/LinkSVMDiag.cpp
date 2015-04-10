@@ -1651,6 +1651,7 @@ void LinkSVMDiag::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
   double *t_w = new double[m_nLabelNum * w_size];
   double *fvec = new double[l * w_size];
   for (int t_label = 0; t_label < m_nLabelNum; t_label++) {
+    l = pC->num_train_links;
     if (m_nLabelNum == 2 && t_label == 1) {
       for (int i = 0; i < w_size; i++) {
         t_w[i + w_size] = -t_w[i];
@@ -1678,7 +1679,12 @@ void LinkSVMDiag::learn_svm(Corpus *pC, double **phi, double *dMu, double eps,
     int *y = new int[l];
     int *from = new int[l], *to = new int[l];
     int id = 0;
-    extract_train_links(pC, from, to, y, t_label);
+    // modified: extract less links than required
+    //extract_train_links(pC, from, to, y, t_label);
+
+    l = extract_train_links(pC, from, to, y, t_label, l / 10);
+    printf("train links: %d\n", l);
+
     for (int i = 0; i < l; i++) {
       alpha[i] = 0;
     }
@@ -2172,3 +2178,23 @@ void LinkSVMDiag::extract_train_links(Corpus *pC, int *from, int *to, int *label
   }
 }
 
+int LinkSVMDiag::extract_train_links(Corpus *pC, int *from, int *to, int *label, int l, int max_num) {
+    int id = 0;
+    for (int d = 0; d < pC->num_docs; d++) {
+        Document *pDoc = &(pC->docs[d]);
+        for (int k = 0; k < pDoc->num_neighbors; k++) {
+            if (!pDoc->bTrain[k]) continue;
+            if ((double)rand()/RAND_MAX > (double)max_num / m_nTrainLinks) continue;
+            if (id >= max_num) continue;
+            from[id] = d;
+            to[id] = pDoc->neighbors[k];
+            if (pDoc->linkGnd[k] == l) {
+                label[id] = 1;
+            } else {
+                label[id] = -1;
+            }
+            id++;
+        }
+    }
+    return id;
+}
