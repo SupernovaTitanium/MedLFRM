@@ -1,23 +1,23 @@
 wiki
 LinkSVM
 display 1
-stochastic nu 100
+stochastic nu 200
 stochastic phi 100
 phi iter 10 
 original feature 1
-var max iter 30
+var max iter 10
 var convergence 1e-4
-em max iter 15
+em max iter 20
 em convergence 1e-4
 KL-C 1
-svm-C 5
+svm-C 10
 init alpha 10 
 svm_alg_type 2
 biased_hyperplane 0
 truncated-T 50
 phi-dual-opt 1
 forgetting rate nu 0
-forgetting rate phi 0.9 
+forgetting rate phi 0.2 
 train_file: /Data/Wiki
 test_file: /Data/Wiki
 class-num: 2

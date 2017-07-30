@@ -4,9 +4,9 @@ display 1
 stochastic nu 10
 stochastic phi 50 
 original feature 1
-var max iter 20
+var max iter 15
 var convergence 1e-4
-em max iter 7
+em max iter 10
 em convergence 1e-4
 KL-C 1
 svm-C 16.0
@@ -16,7 +16,7 @@ biased_hyperplane 0
 truncated-T 50
 phi-dual-opt 1
 forgetting rate nu 0
-forgetting rate phi 0.9 
+forgetting rate phi 0.5
 train_file: /Data/Kinship
 test_file: /Data/Kinship
 class-num: 2
