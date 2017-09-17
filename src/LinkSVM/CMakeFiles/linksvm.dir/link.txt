@@ -1,0 +1,2 @@
+/usr/bin/ar qc liblinksvm.a  CMakeFiles/linksvm.dir/BayesLinkSVM.cpp.o CMakeFiles/linksvm.dir/BayesLinkSVMSym.cpp.o CMakeFiles/linksvm.dir/LinkSVM.cpp.o CMakeFiles/linksvm.dir/LinkSVMDiag.cpp.o CMakeFiles/linksvm.dir/LinkSVMSym.cpp.o
+/usr/bin/ranlib liblinksvm.a

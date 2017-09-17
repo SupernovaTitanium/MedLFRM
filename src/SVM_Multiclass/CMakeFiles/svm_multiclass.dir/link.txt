@@ -1,0 +1,2 @@
+/usr/bin/ar qc libsvm_multiclass.a  CMakeFiles/svm_multiclass.dir/svm_struct_api.cpp.o CMakeFiles/svm_multiclass.dir/svm_struct_common.cpp.o CMakeFiles/svm_multiclass.dir/svm_struct_learn.cpp.o
+/usr/bin/ranlib libsvm_multiclass.a

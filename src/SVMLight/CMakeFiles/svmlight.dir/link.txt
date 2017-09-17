@@ -1,0 +1,2 @@
+/usr/bin/ar qc libsvmlight.a  CMakeFiles/svmlight.dir/svm_common.cpp.o CMakeFiles/svmlight.dir/svm_hideo.cpp.o CMakeFiles/svmlight.dir/svm_learn.cpp.o
+/usr/bin/ranlib libsvmlight.a

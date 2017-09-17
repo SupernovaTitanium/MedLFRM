@@ -1,0 +1,2 @@
+/usr/bin/ar qc libutils.a  CMakeFiles/utils.dir/cokus.cpp.o CMakeFiles/utils.dir/Corpus.cpp.o CMakeFiles/utils.dir/NormalGammaPrior.cpp.o CMakeFiles/utils.dir/Params.cpp.o CMakeFiles/utils.dir/simple_sparse_vec_hash.cc.o CMakeFiles/utils.dir/utils.cpp.o CMakeFiles/utils.dir/WeightVector.cc.o
+/usr/bin/ranlib libutils.a
